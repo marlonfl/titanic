@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from sklearn.neighbors import KNeighborsClassifier
@@ -10,6 +11,8 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.ensemble import ExtraTreesClassifier
 import matplotlib.pyplot as plt
 from sklearn.feature_selection import SelectFromModel
+from sklearn.model_selection import cross_val_score
+from sklearn.linear_model import LogisticRegression
 
 if __name__ == "__main__":
 
@@ -92,7 +95,8 @@ if __name__ == "__main__":
     test_fare_median = combined.iloc[891:].Fare.median()
     combined.Fare.loc[:891][np.isnan(combined.Fare.loc[:891])] = train_fare_median
     combined.Fare.loc[891:][np.isnan(combined.Fare.loc[891:])] = test_fare_median
-
+    combined["Young"] = [1 if age <= 10 else 0 for age in combined.Age]
+    combined.drop(["Age"], axis=1, inplace=True)
     # normalizing
     #combined = (combined - combined.min()) / (combined.max() - combined.min())
 
@@ -102,26 +106,110 @@ if __name__ == "__main__":
 
     X_train = combined.head(891)
     y_train = y
-    #X_test = combined.iloc[891:]
+    X_test = combined.iloc[891:]
 
-    clf = RandomForestClassifier(n_estimators=50, max_features='sqrt')
-    clf = clf.fit(X_train, y_train)
+    X_small_train, X_val, y_small_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=0)
 
-    features = pd.DataFrame()
-    features['feature'] = X_train.columns
-    features['importance'] = clf.feature_importances_
-    features.sort_values(by=['importance'], ascending=False, inplace=True)
-    features.set_index('feature', inplace=True)
 
-    features.plot(kind="barh")
+    # k nearest neighbors
+    knn_params = [
+        {'n_neighbors' : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+         'weights' : ['uniform', 'distance'] }
+    ]
+    knn_grid_search = GridSearchCV(KNeighborsClassifier(), knn_params, cv=3)
+    knn_grid_search.fit(X_train, y_train)
+    print ("Best kNN Parameters: " + str(knn_grid_search.best_params_))
+
+    knn = KNeighborsClassifier(**knn_grid_search.best_params_)
+    knn.fit(X_train, y_train)
+    #score_knn = cross_val_score(knn, X_val, y_val, cv=5).mean()
+    #print("Accuracy kNN: " + str(score_knn))
+
+    pred_knn = knn.predict(X_test)
+
+    print("----------------------------")
+
+    # SVM
+    Cs = [0.1, 1, 6, 11, 15, 20]
+    gammas = [0.001, 0.01, 0.03, 0.05, 0.15, 0.25, 0.5]
+    svm_params = {"gamma":gammas, "C":Cs}
+    svm_grid_search = GridSearchCV(svm.SVC(kernel='rbf'), svm_params, cv=3)
+    svm_grid_search.fit(X_train, y_train)
+    print ("Best SVM Parameters: " + str(svm_grid_search.best_params_))
+
+    svm = svm.SVC(**svm_grid_search.best_params_)
+    svm.fit(X_train, y_train)
+    #score_svm = cross_val_score(svm, X_val, y_val, cv=5).mean()
+    #print("Accuracy SVM: " + str(score_svm))
+
+    pred_svm = svm.predict(X_test)
+
+    print("----------------------------")
+
+    log = LogisticRegression()
+    log.fit(X_train, y_train)
+    #score_log = cross_val_score(log, X_val, y_val, cv=5).mean()
+    #print("Accuracy Logistic Regression: " + str(score_log))
+
+    pred_log = log.predict(X_test)
+
+    print("----------------------------")
+
+    # random forest
+    rfc_params = {
+                "min_samples_leaf" : [1, 3, 5, 7],
+                "min_samples_split" : [2, 4, 6, 8, 10]
+                 }
+    rfc_grid_search = GridSearchCV(RandomForestClassifier(n_estimators=250, max_features='auto',n_jobs=3), rfc_params, cv=3)
+    rfc_grid_search.fit(X_train, y_train)
+    print ("Best Random Forest Parameters: " + str(rfc_grid_search.best_params_))
+
+    rfc = RandomForestClassifier(max_features='auto',n_jobs=3, **rfc_grid_search.best_params_)
+    rfc.fit(X_train, y_train)
+    #score_rfc = cross_val_score(rfc, X_val, y_val, cv=5).mean()
+    #print("Accuracy Random Forest: " + str(score_rfc))
+
+    pred_rfc = rfc.predict(X_test)
+
+    print("----------------------------")
+
+    # extra trees
+    etc_params = {
+                "min_samples_leaf" : [1, 3, 5, 7],
+                "min_samples_split" : [2, 4, 6, 8, 10]
+                 }
+    etc_grid_search = GridSearchCV(ExtraTreesClassifier(n_estimators=250, max_features='auto',n_jobs=3), rfc_params, cv=3)
+    etc_grid_search.fit(X_train, y_train)
+    print ("Best Extra Trees Parameters: " + str(etc_grid_search.best_params_))
+
+    etc = ExtraTreesClassifier(max_features='auto',n_jobs=3, **etc_grid_search.best_params_)
+    etc.fit(X_train, y_train)
+    #score_etc = cross_val_score(etc, X_val, y_val, cv=5).mean()
+    #print("Accuracy Extra Trees: " + str(score_etc))
+
+    pred_etc = etc.predict(X_test)
+
+    print("----------------------------")
+
+    preds = pd.DataFrame()
+    preds["KNN"] = pred_knn
+    preds["SVM"] = pred_svm
+    preds["Logistic Regression"] = pred_log
+    preds["Random Forest"] = pred_rfc
+    preds["Extra Trees"] = pred_etc
+
+    plt.figure(figsize=(12,10))
+    foo = sns.heatmap(preds.corr(), vmax=1.0, square=True, annot=True)
     plt.show()
+    foo.plot()
 
-    print(X_train.corr())
-    #print (X_test[X_test.isnull()])
-    #X_small_train, X_val, y_small_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=5)
+    sums = [sum(pred) for pred in zip(pred_knn, pred_svm, pred_log, pred_rfc, pred_etc)]
+    final_pred = [1 if item > 2 else 0 for item in sums]
+    final = pd.DataFrame()
+    final["PassengerId"] = p_id
+    final["Survived"] = final_pred
 
-    #kNN = KNeighborsClassifier(3)
-    #kNN.fit(X_small_train, y_small_train)
+    final.to_csv('ensemble_pred.csv', index=False)
 
     #Cs = [0.001, 0.01, 0.1, 0.5, 1, 2, 4, 8, 9, 10, 11, 12, 16, 20]
     #gammas = [0.001, 0.01, 0.03, 0.06, 0.08, 0.1, 0.12, 0.15, 0.18, 0.2, 0.25, 0.3]
@@ -154,5 +242,3 @@ if __name__ == "__main__":
     #d = {'PassengerId':p_id, 'Survived':y_pred}
     #s = pd.DataFrame(d)
     #s.to_csv("pred_svm.csv", index=False)
-
-    print ()
